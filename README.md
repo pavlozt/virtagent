@@ -28,7 +28,7 @@ nmap -sn -PE 172.30.0.0/24
 >(-sn for disable port scan, -PE for ping echo)
 
 To assemble your stand for automatic testing, you need to add a virtual network setting to the containers,
-namely running `ip route` commands. Examples of such settings are in the file [entrypoint.sh](./src/entrypoint.sh)
+namely running `ip route` commands. Examples of such settings are in the file [entrypoint.sh](./network-tools/entrypoint.sh)
 
 # Limitations #
 In the current version, the program can only simulate ping echo responses. IPv6 not yet supported.
