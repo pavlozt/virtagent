@@ -1,4 +1,4 @@
-# VirtAgent #
+# VirtAgent ![CI](https://github.com/pavlozt/virtagent/actions/workflows/ci.yml/badge.svg) #
 A program for simulating large networks with low resource consumption.
 Suitable for benchmarking network monitoring systems.
 
