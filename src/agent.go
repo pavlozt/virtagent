@@ -11,7 +11,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// The main function for processing packets.
+// The main  function for processing packets.
 // If you want to build a custom handler, go here
 func inputProcessor(myIpAddress netip.Addr, isRouter bool, inchan <-chan inputPacket, outchan chan<- outputPacket) {
 	for packet := range inchan {
@@ -36,7 +36,9 @@ func inputProcessor(myIpAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 					}
 					log.Debugf("Build ARP Reply %v at %v", arpLayer.DstProtAddress, arpLayer.DstHwAddress)
 					out := buildPacket(ethernetLayer, arpLayer, nil, nil, nil)
-					outchan <- out
+					go func() {
+						outchan <- out
+					}()
 				}
 			}
 		}
@@ -50,36 +52,37 @@ func inputProcessor(myIpAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 				fromIPAddress == myIpAddress { // Did make a mistake when sending the package? Additional verification.
 				loss := rand.Float64()
 				if loss > packetLossRate {
-					sleepms := math.Round((float64(replyTimeoutMs) + rand.NormFloat64()*float64(replyStddevMs)))
-					log.Tracef("Wait for %v ms", replyTimeoutMs)
-					time.Sleep(time.Duration(sleepms) * time.Millisecond)
+					go func() {
+						sleepms := math.Round((float64(replyTimeoutMs) + rand.NormFloat64()*float64(replyStddevMs)))
+						log.Tracef("Wait for %v ms", replyTimeoutMs)
+						time.Sleep(time.Duration(sleepms) * time.Millisecond)
+						// Assemble regular ICMP reply packet
+						applicationLayer := packet.packet.ApplicationLayer()
+						var replyBytes []byte
+						if applicationLayer != nil {
+							replyBytes = applicationLayer.Payload()
+						}
 
-					// Assemble regular ICMP reply packet
-					applicationLayer := packet.packet.ApplicationLayer()
-					var replyBytes []byte
-					if applicationLayer != nil {
-						replyBytes = applicationLayer.Payload()
-					}
-
-					icmpLayer := &layers.ICMPv4{
-						TypeCode: layers.ICMPv4TypeEchoReply,
-						Seq:      packet.icmpLayer.Seq,
-						Id:       packet.icmpLayer.Id,
-					}
-					ipLayer := &layers.IPv4{
-						SrcIP:    packet.ipLayer.DstIP,
-						DstIP:    packet.ipLayer.SrcIP,
-						Version:  4,
-						TTL:      245,
-						Protocol: layers.IPProtocolICMPv4,
-					}
-					ethernetLayer := &layers.Ethernet{
-						SrcMAC:       packet.etherLayer.DstMAC,
-						DstMAC:       packet.etherLayer.SrcMAC,
-						EthernetType: layers.EthernetTypeIPv4,
-					}
-					out := buildPacket(ethernetLayer, nil, ipLayer, icmpLayer, replyBytes)
-					outchan <- out
+						icmpLayer := &layers.ICMPv4{
+							TypeCode: layers.ICMPv4TypeEchoReply,
+							Seq:      packet.icmpLayer.Seq,
+							Id:       packet.icmpLayer.Id,
+						}
+						ipLayer := &layers.IPv4{
+							SrcIP:    packet.ipLayer.DstIP,
+							DstIP:    packet.ipLayer.SrcIP,
+							Version:  4,
+							TTL:      245,
+							Protocol: layers.IPProtocolICMPv4,
+						}
+						ethernetLayer := &layers.Ethernet{
+							SrcMAC:       packet.etherLayer.DstMAC,
+							DstMAC:       packet.etherLayer.SrcMAC,
+							EthernetType: layers.EthernetTypeIPv4,
+						}
+						out := buildPacket(ethernetLayer, nil, ipLayer, icmpLayer, replyBytes)
+						outchan <- out
+					}()
 				}
 			}
 		}
