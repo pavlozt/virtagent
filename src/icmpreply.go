@@ -15,6 +15,8 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/gopacket"
@@ -38,6 +40,8 @@ var (
 	addressTable     map[netip.Addr]chan inputPacket
 	globalPacketChan chan gopacket.Packet
 	output_channel   chan outputPacket
+
+	exitWG sync.WaitGroup // global WaitGroup for graceful shutdown
 
 	replyTimeoutMs uint
 	replyStddevMs  uint
@@ -99,6 +103,8 @@ func buildPacket(
 
 // Sending all prepared packets to the network in one stream
 func toNetworkSender(out <-chan outputPacket, pcapHandler *pcap.Handle) {
+	exitWG.Add(1) // global WaitGroup for graceful shutdown
+	defer exitWG.Done()
 	for reply := range out {
 		log.Traceln(reply.packetBytes)
 		err := pcapHandle.WritePacketData(reply.packetBytes)
@@ -135,7 +141,7 @@ func globalInit() {
 	rand.Seed(time.Now().UnixNano())
 
 	signalChannel := make(chan os.Signal, 1)
-	signal.Notify(signalChannel, os.Interrupt)
+	signal.Notify(signalChannel, os.Interrupt, syscall.SIGQUIT)
 	go shutDown(signalChannel)
 }
 
@@ -256,4 +262,6 @@ func main() {
 		}
 	}
 	// Shutdown function closes all opened handles and channels
+	log.Traceln("waiting for all and sync group")
+	exitWG.Wait()
 }

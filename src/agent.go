@@ -14,6 +14,8 @@ import (
 // The main  function for processing packets.
 // If you want to build a custom handler, go here
 func inputProcessor(myIpAddress netip.Addr, isRouter bool, inchan <-chan inputPacket, outchan chan<- outputPacket) {
+	exitWG.Add(1) // global WaitGroup for graceful shutdown
+	defer exitWG.Done()
 	for packet := range inchan {
 		if packet.arpLayer != nil { // if arp
 			if (routerMode && isRouter) || (!routerMode) {
