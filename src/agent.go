@@ -12,7 +12,7 @@ import (
 )
 
 // The main  function for processing packets.
-// If you want to build a custom handler, go here
+// If you want to build a custom handler, go here.
 func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPacket, outchan chan<- outputPacket) {
 	exitWG.Add(1) // global WaitGroup for graceful shutdown
 	defer exitWG.Done()
@@ -20,7 +20,8 @@ func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 		if packet.arpLayer != nil { // if arp
 			if (routerMode && isRouter) || (!routerMode) {
 				fromArpAddress, _ := netip.AddrFromSlice(packet.arpLayer.DstProtAddress)
-				if packet.arpLayer.Operation == layers.ARPRequest && myIPAddress == fromArpAddress { // is this request where is my IP ?
+				// is this request where is my IP ?
+				if packet.arpLayer.Operation == layers.ARPRequest && myIPAddress == fromArpAddress {
 					log.Debugf("Arp request: %v -> %v ", packet.etherLayer.SrcMAC, packet.etherLayer.DstMAC)
 					ethernetLayer := &layers.Ethernet{
 						SrcMAC:       myMAC,
@@ -38,6 +39,7 @@ func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 					}
 					log.Debugf("Build ARP Reply %v at %v", arpLayer.DstProtAddress, arpLayer.DstHwAddress)
 					out := buildPacket(ethernetLayer, arpLayer, nil, nil, nil)
+
 					go func() {
 						outchan <- out
 					}()

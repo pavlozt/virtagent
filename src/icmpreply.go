@@ -26,12 +26,20 @@ import (
 	"go4.org/netipx" // non-standard library, but cool.
 )
 
+const (
+	// Expression should be optimized for specific simulator behavior
+	// This is for icmp pings.
+	filterExpression = "arp or (icmp and icmp[icmptype] != icmp-echoreply)"
+)
+
 var (
-	devicename             = "eth0"
+	// hard-coded pcap filterExpression
+	devicename       string
 	snapshotLen      int32 = 1024
 	promiscuous            = true
 	pcapHandle       *pcap.Handle
 	myMAC            []byte
+	myRouterAddress  netip.Addr
 	ipRangeString    string
 	ipRange          netipx.IPRange
 	simulateRouter   string
@@ -60,12 +68,12 @@ type inputPacket struct {
 }
 
 // Separate type for outgoing packets
-// you may need to send additional features, but only packet bytes are sent now
+// you may need to send additional features, but only packet bytes are sent now.
 type outputPacket struct {
 	packetBytes []uint8
 }
 
-// Single package assembly point
+// Single package assembly point.
 func buildPacket(
 	ethernetLayer gopacket.SerializableLayer,
 	arpLayer gopacket.SerializableLayer,
@@ -73,8 +81,10 @@ func buildPacket(
 	icmpLayer gopacket.SerializableLayer,
 	payloadBytes []byte) outputPacket {
 
-	var buffer gopacket.SerializeBuffer
-	var out outputPacket
+	var (
+		buffer gopacket.SerializeBuffer
+		out    outputPacket
+	)
 
 	buffer = gopacket.NewSerializeBuffer()
 	serializationOptions := gopacket.SerializeOptions{
@@ -97,42 +107,54 @@ func buildPacket(
 			gopacket.Payload(payloadBytes),
 		)
 	}
+
 	if serialError == nil {
 		out.packetBytes = buffer.Bytes()
 	}
-	return out
 
+	return out
 }
 
-// Sending all prepared packets to the network in one stream
+// Sending all prepared packets to the network in one stream.
 func toNetworkSender(out <-chan outputPacket, pcapHandler *pcap.Handle) {
 	exitWG.Add(1) // global WaitGroup for graceful shutdown
 	defer exitWG.Done()
+
 	for reply := range out {
-		log.Traceln(reply.packetBytes)
-		err := pcapHandle.WritePacketData(reply.packetBytes)
+		log.Traceln("Write to network", reply.packetBytes)
+
+		err := pcapHandler.WritePacketData(reply.packetBytes)
 		if err != nil {
 			log.Fatal(err)
 		}
-
 	}
 }
 
-// Initialization
+// Initialization.
 func globalInit() {
-	flag.StringVar(&simulateRouter, "simulaterouter", "", "Router IP for simulation. If used, program simulate router. If absent, simulate bridged network.")
-	flag.StringVar(&ipRangeString, "iprange", "", "IP range for simulation. (For example 172.26.0.1-172.26.0.254)")
-	flag.UintVar(&replyTimeoutMs, "timeout", 200, "Reply timeout for ping reply in milliseconds.")
-	flag.UintVar(&replyStddevMs, "replystddev", 0, "Reply standart deviation in milliseconds.")
-	flag.Float64Var(&packetLossRate, "packetlossrate", 0.0, "Packet loss rate. Float number from 0.0 to 1.0")
-	flag.StringVar(&loglevel, "loglevel", "error", "Log level(fatal, error, warning, debug, trace)")
-	flag.StringVar(&devicename, "iface", "eth0", "Interface name")
+	// Setup command line arguments
+	flag.StringVar(&simulateRouter, "simulaterouter", "",
+		"Router IP for simulation. If used, program simulate router. If absent, simulate bridged network.")
+	flag.StringVar(&ipRangeString, "iprange", "",
+		"IP range for simulation. (For example 172.26.0.1-172.26.0.254)")
+	flag.UintVar(&replyTimeoutMs, "timeout", 200,
+		"Reply timeout for ping reply in milliseconds.")
+	flag.UintVar(&replyStddevMs, "replystddev", 0,
+		"Reply standart deviation in milliseconds.")
+	flag.Float64Var(&packetLossRate, "packetlossrate", 0.0,
+		"Packet loss rate. Float number from 0.0 to 1.0")
+	flag.StringVar(&loglevel, "loglevel", "error",
+		"Log level(fatal, error, warning, debug, trace)")
+	flag.StringVar(&devicename, "iface", "eth0",
+		"Interface name")
 	flag.Parse()
+
 	ll, err := log.ParseLevel(loglevel)
 	if err != nil {
 		ll = log.ErrorLevel
 	}
 	log.SetLevel(ll)
+
 	if ipRangeString == "" {
 		log.Fatal("ip parameter required")
 	}
@@ -141,64 +163,85 @@ func globalInit() {
 		log.Fatal("Cant' parse ip range")
 	}
 
-	rand.Seed(time.Now().UnixNano())
-
-	signalChannel := make(chan os.Signal, 1)
-	signal.Notify(signalChannel, os.Interrupt, syscall.SIGQUIT)
-	go shutDown(signalChannel)
-}
-
-// Special Shutdown hander
-func shutDown(signalChannel chan os.Signal) {
-	<-signalChannel
-	log.Debugln("Shutdown.")
-	close(globalPacketChan)
-	for ip, readChannel := range addressTable {
-		log.Traceln("closing ", ip.String())
-		close(readChannel)
-	}
-	close(outputChannel)
-	pcapHandle.Close()
-}
-
-// Main program
-func main() {
-	globalInit()
-	myRouterAddress, err := netip.ParseAddr(simulateRouter)
-	if err == nil && !myRouterAddress.IsUnspecified() {
-		routerMode = true
-	}
 	iface, err := net.InterfaceByName(devicename)
 	if err != nil {
 		log.Fatal("no interfaces. Stop.")
 	}
+
 	myMAC = iface.HardwareAddr
 	log.Debug("Using device MAC ", iface.HardwareAddr.String())
-	pcapHandle, _ = pcap.OpenLive(devicename, snapshotLen, promiscuous, pcap.BlockForever)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if pcapHandle == nil {
-		log.Fatal("Can't open capture interface. (Need root capabilities?)")
-	}
-	log.Debug("Live capture interfaces opened")
 
-	var filter = "arp or (icmp and icmp[icmptype] != icmp-echoreply)"
-	err = pcapHandle.SetBPFFilter(filter)
-	if err != nil {
-		log.Fatal(err)
+	rand.Seed(time.Now().UnixNano())
+
+	myRouterAddress, err := netip.ParseAddr(simulateRouter)
+	if err == nil && !myRouterAddress.IsUnspecified() {
+		routerMode = true
 	}
-	log.Debugf("Capturing with filter \"%s\"", filter)
+
 	if routerMode {
 		log.Debugf("Mode: router (%v) with single arp reply", myRouterAddress)
 	} else {
 		log.Debug("Mode: bridge with broadcast arp reply")
 	}
-	log.Debugf("Reply IP range %s", ipRange)
 
-	packetSource := gopacket.NewPacketSource(pcapHandle, pcapHandle.LinkType())
+	log.Debugf("Reply IP range %s", ipRange)
+}
+
+// Prepare for shutdown with CTRL-C .
+func prepareShutDown() {
+	signalChannel := make(chan os.Signal, 1)
+	signal.Notify(signalChannel, os.Interrupt, syscall.SIGQUIT)
+
+	go shutDown(signalChannel)
+}
+
+// Special Shutdown hander.
+func shutDown(signalChannel chan os.Signal) {
+	<-signalChannel
+	log.Debugln("Shutdown.")
+	close(globalPacketChan)
+
+	for ip, readChannel := range addressTable {
+		log.Traceln("closing ", ip.String())
+		close(readChannel)
+	}
+
+	close(outputChannel)
+	pcapHandle.Close()
+}
+
+// Initialize libpcap part.
+func pcapInit() *gopacket.PacketSource {
+	pcapHandle, err := pcap.OpenLive(devicename, snapshotLen, promiscuous, pcap.BlockForever)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if pcapHandle == nil {
+		log.Fatal("Can't open capture interface. (Need root capabilities?)")
+	}
+
+	log.Debug("Live capture interfaces opened")
+
+	err = pcapHandle.SetBPFFilter(filterExpression)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Debugf("Capturing with filter \"%s\"", filterExpression)
+
+	return gopacket.NewPacketSource(pcapHandle, pcapHandle.LinkType())
+}
+
+// Main program.
+func main() {
+	globalInit()
+	pcapInit()
+
+	packetSource := pcapInit()
 	outputChannel = make(chan outputPacket)
 	addressTable = make(map[netip.Addr]chan inputPacket)
+
 	for ip := ipRange.From(); ip.Compare(ipRange.To()) <= 0; ip = ip.Next() {
 		log.Traceln("New channel for ip:", ip)
 		// Do We need to redo thread creation only when a new packet arrives?
@@ -206,17 +249,23 @@ func main() {
 		// for ease of processing, now we create all the channels at the start.
 		agentInputChannel := make(chan inputPacket)
 		addressTable[ip] = agentInputChannel
+
 		go inputProcessor(ip, false, agentInputChannel, outputChannel) // host(s)
 	}
 
-	inputRouterChannel := make(chan inputPacket)
-	if routerMode {
-		log.Traceln("New channel for ip:", myRouterAddress)
-		addressTable[myRouterAddress] = inputRouterChannel
-		go inputProcessor(myRouterAddress, true, inputRouterChannel, outputChannel) // router
-	}
+	prepareShutDown()
 
-	go toNetworkSender(outputChannel, pcapHandle) // always need reply sender
+	inputRouterChannel := make(chan inputPacket)
+
+	if routerMode {
+		addressTable[myRouterAddress] = inputRouterChannel
+
+		go inputProcessor(myRouterAddress, true, inputRouterChannel, outputChannel) // router
+		log.Traceln("New handler for ip:", myRouterAddress)
+	}
+	// Sender gorutine must ready to work
+	go toNetworkSender(outputChannel, pcapHandle)
+
 	globalPacketChan = packetSource.Packets()
 	for packet := range globalPacketChan {
 		etherLayer := packet.Layer(layers.LayerTypeEthernet)
@@ -261,7 +310,6 @@ func main() {
 			if exists {
 				inputChan <- inputStruct
 			}
-
 		}
 	}
 	// Shutdown function closes all opened handles and channels

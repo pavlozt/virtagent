@@ -1,3 +1,5 @@
 linters:
-  enable: 
+  #Default: false
+  #enable-all: true
+  enable:
     - revive
