@@ -13,14 +13,14 @@ import (
 
 // The main  function for processing packets.
 // If you want to build a custom handler, go here
-func inputProcessor(myIpAddress netip.Addr, isRouter bool, inchan <-chan inputPacket, outchan chan<- outputPacket) {
+func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPacket, outchan chan<- outputPacket) {
 	exitWG.Add(1) // global WaitGroup for graceful shutdown
 	defer exitWG.Done()
 	for packet := range inchan {
 		if packet.arpLayer != nil { // if arp
 			if (routerMode && isRouter) || (!routerMode) {
 				fromArpAddress, _ := netip.AddrFromSlice(packet.arpLayer.DstProtAddress)
-				if packet.arpLayer.Operation == layers.ARPRequest && myIpAddress == fromArpAddress { // is this request where is my IP ?
+				if packet.arpLayer.Operation == layers.ARPRequest && myIPAddress == fromArpAddress { // is this request where is my IP ?
 					log.Debugf("Arp request: %v -> %v ", packet.etherLayer.SrcMAC, packet.etherLayer.DstMAC)
 					ethernetLayer := &layers.Ethernet{
 						SrcMAC:       myMAC,
@@ -31,7 +31,7 @@ func inputProcessor(myIpAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 						AddrType:          packet.arpLayer.AddrType,
 						Protocol:          packet.arpLayer.Protocol,
 						SourceHwAddress:   myMAC, // using  MAC from global variable
-						SourceProtAddress: myIpAddress.AsSlice(),
+						SourceProtAddress: myIPAddress.AsSlice(),
 						DstHwAddress:      packet.arpLayer.SourceHwAddress,
 						DstProtAddress:    packet.arpLayer.SourceProtAddress,
 						Operation:         layers.ARPReply,
@@ -51,13 +51,10 @@ func inputProcessor(myIpAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 			log.Debugf("ICMP flow# %v, requence %v\n", packet.icmpLayer.Id, packet.icmpLayer.Seq)
 			fromIPAddress, _ := netip.AddrFromSlice(packet.ipLayer.DstIP)
 			if packet.icmpLayer.TypeCode.Type() == layers.ICMPv4TypeEchoRequest &&
-				fromIPAddress == myIpAddress { // Did make a mistake when sending the package? Additional verification.
+				fromIPAddress == myIPAddress { // Did make a mistake when sending the package? Additional verification.
 				loss := rand.Float64()
 				if loss > packetLossRate {
 					go func() {
-						sleepms := math.Round((float64(replyTimeoutMs) + rand.NormFloat64()*float64(replyStddevMs)))
-						log.Tracef("Wait for %v ms", replyTimeoutMs)
-						time.Sleep(time.Duration(sleepms) * time.Millisecond)
 						// Assemble regular ICMP reply packet
 						applicationLayer := packet.packet.ApplicationLayer()
 						var replyBytes []byte
@@ -83,11 +80,14 @@ func inputProcessor(myIpAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 							EthernetType: layers.EthernetTypeIPv4,
 						}
 						out := buildPacket(ethernetLayer, nil, ipLayer, icmpLayer, replyBytes)
+						sleepms := math.Round((float64(replyTimeoutMs) + rand.NormFloat64()*float64(replyStddevMs)))
+						log.Tracef("Wait for %v ms", replyTimeoutMs)
+						time.Sleep(time.Duration(sleepms) * time.Millisecond)
 						outchan <- out
 					}()
 				}
 			}
 		}
 	}
-	log.Trace("Processor exit ", myIpAddress)
+	log.Trace("Handler exit ", myIPAddress)
 }

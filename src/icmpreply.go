@@ -27,9 +27,9 @@ import (
 )
 
 var (
-	devicename       string = "eth0"
-	snapshot_len     int32  = 1024
-	promiscuous      bool   = true
+	devicename             = "eth0"
+	snapshotLen      int32 = 1024
+	promiscuous            = true
 	pcapHandle       *pcap.Handle
 	myMAC            []byte
 	ipRangeString    string
@@ -39,7 +39,7 @@ var (
 	routerMode       = false
 	addressTable     map[netip.Addr]chan inputPacket
 	globalPacketChan chan gopacket.Packet
-	output_channel   chan outputPacket
+	outputChannel    chan outputPacket
 
 	exitWG sync.WaitGroup // global WaitGroup for graceful shutdown
 
@@ -82,21 +82,24 @@ func buildPacket(
 		ComputeChecksums: true,
 	}
 	// Now there are two build variants arp and ICMP
+	var serialError error
 	if arpLayer != nil {
-		gopacket.SerializeLayers(buffer, serializationOptions,
+		serialError = gopacket.SerializeLayers(buffer, serializationOptions,
 			ethernetLayer,
 			arpLayer,
 			//  arp does not need payload
 		)
 	} else if icmpLayer != nil {
-		gopacket.SerializeLayers(buffer, serializationOptions,
+		serialError = gopacket.SerializeLayers(buffer, serializationOptions,
 			ethernetLayer,
 			ipLayer,
 			icmpLayer,
 			gopacket.Payload(payloadBytes),
 		)
 	}
-	out.packetBytes = buffer.Bytes()
+	if serialError == nil {
+		out.packetBytes = buffer.Bytes()
+	}
 	return out
 
 }
@@ -154,7 +157,7 @@ func shutDown(signalChannel chan os.Signal) {
 		log.Traceln("closing ", ip.String())
 		close(readChannel)
 	}
-	close(output_channel)
+	close(outputChannel)
 	pcapHandle.Close()
 }
 
@@ -171,7 +174,7 @@ func main() {
 	}
 	myMAC = iface.HardwareAddr
 	log.Debug("Using device MAC ", iface.HardwareAddr.String())
-	pcapHandle, _ = pcap.OpenLive(devicename, snapshot_len, promiscuous, pcap.BlockForever)
+	pcapHandle, _ = pcap.OpenLive(devicename, snapshotLen, promiscuous, pcap.BlockForever)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -180,7 +183,7 @@ func main() {
 	}
 	log.Debug("Live capture interfaces opened")
 
-	var filter string = "arp or (icmp and icmp[icmptype] != icmp-echoreply)"
+	var filter = "arp or (icmp and icmp[icmptype] != icmp-echoreply)"
 	err = pcapHandle.SetBPFFilter(filter)
 	if err != nil {
 		log.Fatal(err)
@@ -194,7 +197,7 @@ func main() {
 	log.Debugf("Reply IP range %s", ipRange)
 
 	packetSource := gopacket.NewPacketSource(pcapHandle, pcapHandle.LinkType())
-	output_channel = make(chan outputPacket)
+	outputChannel = make(chan outputPacket)
 	addressTable = make(map[netip.Addr]chan inputPacket)
 	for ip := ipRange.From(); ip.Compare(ipRange.To()) <= 0; ip = ip.Next() {
 		log.Traceln("New channel for ip:", ip)
@@ -203,17 +206,17 @@ func main() {
 		// for ease of processing, now we create all the channels at the start.
 		agentInputChannel := make(chan inputPacket)
 		addressTable[ip] = agentInputChannel
-		go inputProcessor(ip, false, agentInputChannel, output_channel) // host(s)
+		go inputProcessor(ip, false, agentInputChannel, outputChannel) // host(s)
 	}
 
-	input_router_channel := make(chan inputPacket)
+	inputRouterChannel := make(chan inputPacket)
 	if routerMode {
 		log.Traceln("New channel for ip:", myRouterAddress)
-		addressTable[myRouterAddress] = input_router_channel
-		go inputProcessor(myRouterAddress, true, input_router_channel, output_channel) // router
+		addressTable[myRouterAddress] = inputRouterChannel
+		go inputProcessor(myRouterAddress, true, inputRouterChannel, outputChannel) // router
 	}
 
-	go toNetworkSender(output_channel, pcapHandle) // always need reply sender
+	go toNetworkSender(outputChannel, pcapHandle) // always need reply sender
 	globalPacketChan = packetSource.Packets()
 	for packet := range globalPacketChan {
 		etherLayer := packet.Layer(layers.LayerTypeEthernet)
@@ -223,9 +226,9 @@ func main() {
 		ip, _ := ipLayer.(*layers.IPv4)
 		icmpLayer := packet.Layer(layers.LayerTypeICMPv4)
 
-		var marsh_packet inputPacket
-		marsh_packet.packet = packet
-		marsh_packet.etherLayer = ether
+		var inputStruct inputPacket
+		inputStruct.packet = packet
+		inputStruct.etherLayer = ether
 
 		log.Tracef("Input packet %v", packet)
 
@@ -241,22 +244,22 @@ func main() {
 		if arpLayer != nil {
 			arp := arpLayer.(*layers.ARP)
 			if arp.Operation == layers.ARPRequest {
-				marsh_packet.arpLayer = arp
+				inputStruct.arpLayer = arp
 				dstAddr, _ = netip.AddrFromSlice(arp.DstProtAddress)
 			}
 		}
 		if icmpLayer != nil {
 			icmp, _ := icmpLayer.(*layers.ICMPv4)
 			if icmp.TypeCode.Type() == layers.ICMPv4TypeEchoRequest {
-				marsh_packet.ipLayer = ip
-				marsh_packet.icmpLayer = icmp
+				inputStruct.ipLayer = ip
+				inputStruct.icmpLayer = icmp
 				dstAddr, _ = netip.AddrFromSlice(ip.DstIP)
 			}
 		}
 		if !dstAddr.IsUnspecified() {
-			input_chan, exists := addressTable[dstAddr]
+			inputChan, exists := addressTable[dstAddr]
 			if exists {
-				input_chan <- marsh_packet
+				inputChan <- inputStruct
 			}
 
 		}

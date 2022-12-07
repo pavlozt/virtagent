@@ -14,7 +14,7 @@
             "console": "integratedTerminal",
             "program": "${fileDirname}/__debug_bin",
             "preLaunchTask": "go: build (debug)",
-            "args": ["-i","eth0","-simulaterouter", "172.23.160.222","-iprange", "172.200.0.1-172.200.0.10","-loglevel", "trace"]
+            "args": ["-iface","eth0","-simulaterouter", "172.28.79.190","-iprange", "172.200.0.1-172.200.0.3","-loglevel", "trace"]
 
         },
         {

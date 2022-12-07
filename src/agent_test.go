@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -20,6 +21,9 @@ var testPacketARPRequest = []byte(
 )
 
 func TestInputProcessorARP(t *testing.T) {
+
+	// This function tests first packet from channel with timeout! Change this in cause of debugging
+	const secondsTimeout = 2
 
 	inputMockChan := make(chan inputPacket)
 	outputMockChan := make(chan outputPacket)
@@ -37,30 +41,40 @@ func TestInputProcessorARP(t *testing.T) {
 		t.Error("Failed to decode packet:", p.ErrorLayer().Error())
 	}
 
-	if arp, ok_parsed := p.Layer(layers.LayerTypeARP).(*layers.ARP); ok_parsed {
+	if arp, parsedOk := p.Layer(layers.LayerTypeARP).(*layers.ARP); parsedOk {
 		etherLayer := p.Layer(layers.LayerTypeEthernet)
 		ether, _ := etherLayer.(*layers.Ethernet)
 		var mockPacket inputPacket
 		mockPacket.packet = p
 		mockPacket.arpLayer = arp
 		mockPacket.etherLayer = ether
-		myIpAddress, _ := netip.ParseAddr("172.20.0.6")
-		go inputProcessor(myIpAddress, true, inputMockChan, outputMockChan)
+		myIPAddress, _ := netip.ParseAddr("172.20.0.6")
+		var replyPacket outputPacket
+		timeout := time.After(secondsTimeout * time.Second)
+		go inputProcessor(myIPAddress, true, inputMockChan, outputMockChan)
 		inputMockChan <- mockPacket
-		replyPacket := <-outputMockChan
+		select {
+		case <-timeout: // guard timeout
+			t.Fatalf("function din't reply in %v seconds", secondsTimeout)
+		case replyPacket = <-outputMockChan: // normal reply
+		}
+
+		if len(replyPacket.packetBytes) == 0 {
+			t.Error("Packet reply size == 0")
+		}
 		replyGoPacket := gopacket.NewPacket(replyPacket.packetBytes, layers.LinkTypeEthernet, gopacket.Default)
-		packet_ok := false
-		if reply_arp, ok_parsed := replyGoPacket.Layer(layers.LayerTypeARP).(*layers.ARP); ok_parsed {
-			if reply_arp.Operation == 0x2 &&
-				bytes.Equal(reply_arp.SourceProtAddress, []uint8{172, 20, 0, 6}) &&
-				bytes.Equal(reply_arp.DstProtAddress, []uint8{172, 20, 0, 2}) &&
-				bytes.Equal(reply_arp.SourceHwAddress, []uint8("\x02B\xac\x14\x00\x06")) &&
-				bytes.Equal(reply_arp.DstHwAddress, []uint8("\x02B\xac\x14\x00\x02")) {
-				packet_ok = true
+		packetOK := false
+		if replyArp, parsedOk := replyGoPacket.Layer(layers.LayerTypeARP).(*layers.ARP); parsedOk {
+			if replyArp.Operation == 0x2 &&
+				bytes.Equal(replyArp.SourceProtAddress, []uint8{172, 20, 0, 6}) &&
+				bytes.Equal(replyArp.DstProtAddress, []uint8{172, 20, 0, 2}) &&
+				bytes.Equal(replyArp.SourceHwAddress, []uint8("\x02B\xac\x14\x00\x06")) &&
+				bytes.Equal(replyArp.DstHwAddress, []uint8("\x02B\xac\x14\x00\x02")) {
+				packetOK = true
 			}
 		}
-		if !packet_ok {
-			t.Error("ARP Reply fail")
+		if !packetOK {
+			t.Error("ARP Reply Headers incorrect")
 		}
 	}
 }
@@ -71,6 +85,9 @@ var testPacketICMPRequest = []byte(
 
 // ICMP test.
 func TestInputProcessorICMP(t *testing.T) {
+
+	// This function tests first packet from channel with timeout! Change this in cause of debugging
+	const secondsTimeout = 2
 
 	inputMockChan := make(chan inputPacket)
 	outputMockChan := make(chan outputPacket)
@@ -88,7 +105,7 @@ func TestInputProcessorICMP(t *testing.T) {
 		t.Error("Failed to decode packet:", p.ErrorLayer().Error())
 	}
 
-	if icmp, ok_parsed := p.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4); ok_parsed {
+	if icmp, parsedOk := p.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4); parsedOk {
 		etherLayer := p.Layer(layers.LayerTypeEthernet)
 		ether, _ := etherLayer.(*layers.Ethernet)
 		ipLayer := p.Layer(layers.LayerTypeIPv4)
@@ -99,25 +116,39 @@ func TestInputProcessorICMP(t *testing.T) {
 		mockPacket.icmpLayer = icmp
 		mockPacket.ipLayer = ip
 		mockPacket.etherLayer = ether
-		myIpAddress, _ := netip.ParseAddr("172.30.0.1")
-		go inputProcessor(myIpAddress, true, inputMockChan, outputMockChan)
+		myIPAddress, _ := netip.ParseAddr("172.30.0.1")
+		var replyPacket outputPacket
+		timeout := time.After(secondsTimeout * time.Second)
+		go inputProcessor(myIPAddress, true, inputMockChan, outputMockChan)
 		inputMockChan <- mockPacket
-		replyPacket := <-outputMockChan
-		replyGoPacket := gopacket.NewPacket(replyPacket.packetBytes, layers.LinkTypeEthernet, gopacket.Default)
-		packet_ok := false
-		if reply_ip, ok_parsed := replyGoPacket.Layer(layers.LayerTypeIPv4).(*layers.IPv4); ok_parsed {
-			if reply_icmp, ok_parsed := replyGoPacket.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4); ok_parsed {
-				if reply_icmp.TypeCode == 0x0 &&
-					reply_icmp.Seq == 0x1 &&
-					bytes.Equal(reply_ip.SrcIP, []uint8{172, 30, 0, 1}) &&
-					bytes.Equal(reply_ip.DstIP, []uint8{172, 20, 0, 2}) {
+		select {
+		case <-timeout: // guard timeout
+			t.Fatalf("function din't reply in %v seconds", secondsTimeout)
+		case replyPacket = <-outputMockChan: // normal reply
+		}
 
-					packet_ok = true
+		if len(replyPacket.packetBytes) == 0 {
+			t.Error("Packet reply size == 0")
+		}
+		if len(replyPacket.packetBytes) == 0 {
+			t.Error("Packet reply size == 0")
+		}
+		replyGoPacket := gopacket.NewPacket(replyPacket.packetBytes, layers.LinkTypeEthernet, gopacket.Default)
+		packetOk := false
+		if replyIP, parsedOk := replyGoPacket.Layer(layers.LayerTypeIPv4).(*layers.IPv4); parsedOk {
+			if replyICMP, parsedOk := replyGoPacket.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4); parsedOk {
+				if replyICMP.TypeCode == 0x0 &&
+					replyICMP.Seq == 0x1 &&
+					bytes.Equal(replyIP.SrcIP, []uint8{172, 30, 0, 1}) &&
+					bytes.Equal(replyIP.DstIP, []uint8{172, 20, 0, 2}) {
+
+					packetOk = true
 				}
 			}
 		}
-		if !packet_ok {
-			t.Error("ICMP Reply fail")
+		if !packetOk {
+
+			t.Error("ICMP Reply Headers incorrect")
 		}
 	}
 }
