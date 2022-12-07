@@ -173,7 +173,7 @@ func globalInit() {
 
 	rand.Seed(time.Now().UnixNano())
 
-	myRouterAddress, err := netip.ParseAddr(simulateRouter)
+	myRouterAddress, err = netip.ParseAddr(simulateRouter)
 	if err == nil && !myRouterAddress.IsUnspecified() {
 		routerMode = true
 	}
@@ -212,7 +212,8 @@ func shutDown(signalChannel chan os.Signal) {
 
 // Initialize libpcap part.
 func pcapInit() *gopacket.PacketSource {
-	pcapHandle, err := pcap.OpenLive(devicename, snapshotLen, promiscuous, pcap.BlockForever)
+	var err error
+	pcapHandle, err = pcap.OpenLive(devicename, snapshotLen, promiscuous, pcap.BlockForever)
 	if err != nil {
 		log.Fatal(err)
 	}
