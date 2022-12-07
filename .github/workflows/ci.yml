@@ -35,7 +35,7 @@ jobs:
 
   docker:
     name: Functional test in docker compose
-    timeout-minutes: 10
+    timeout-minutes: 5
     runs-on: ubuntu-latest
 
     steps:
@@ -43,13 +43,11 @@ jobs:
       uses: actions/checkout@v3
 
     - name: Start containers
-      run: docker compose -f "docker-compose.yml" -p router up -d --build
+      run: docker compose -f "docker-compose.yml" -p virtagenttest up -d --build
 
-        
     - name: ping-test.sh
-      run: ./tests/test_router.sh
-    
+      run: ./tests/test_action.sh
 
     - name: Stop containers
       if: always()
-      run: docker compose -f "docker-compose.yml" -p router down
+      run: docker compose -f "docker-compose.yml" -p virtagenttest down
