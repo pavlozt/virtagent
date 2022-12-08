@@ -16,6 +16,7 @@ import (
 func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPacket, outchan chan<- outputPacket) {
 	exitWG.Add(1) // global WaitGroup for graceful shutdown
 	defer exitWG.Done()
+
 	for packet := range inchan {
 		if packet.arpLayer != nil { // if arp
 			if (routerMode && isRouter) || (!routerMode) {
@@ -23,6 +24,7 @@ func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 				// is this request where is my IP ?
 				if packet.arpLayer.Operation == layers.ARPRequest && myIPAddress == fromArpAddress {
 					log.Debugf("Arp request: %v -> %v ", packet.etherLayer.SrcMAC, packet.etherLayer.DstMAC)
+
 					ethernetLayer := &layers.Ethernet{
 						SrcMAC:       myMAC,
 						DstMAC:       packet.etherLayer.SrcMAC,
@@ -40,26 +42,32 @@ func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 					log.Debugf("Build ARP Reply %v at %v", arpLayer.DstProtAddress, arpLayer.DstHwAddress)
 					out := buildPacket(ethernetLayer, arpLayer, nil, nil, nil)
 
+					exitWG.Add(1)
+
 					go func() {
 						outchan <- out
 					}()
+
+					exitWG.Done()
 				}
 			}
-		}
-		if packet.icmpLayer != nil {
+		} else if packet.icmpLayer != nil { // Or is the ICMP packet ?
 			log.Debug("Incoming ICMP")
 			log.Debugf("MAC: %v -> %v ", packet.etherLayer.SrcMAC, packet.etherLayer.DstMAC)
 			log.Debugf("IP: %s -> %s ", packet.ipLayer.SrcIP, packet.ipLayer.DstIP)
 			log.Debugf("ICMP flow# %v, requence %v\n", packet.icmpLayer.Id, packet.icmpLayer.Seq)
 			fromIPAddress, _ := netip.AddrFromSlice(packet.ipLayer.DstIP)
+
 			if packet.icmpLayer.TypeCode.Type() == layers.ICMPv4TypeEchoRequest &&
 				fromIPAddress == myIPAddress { // Did make a mistake when sending the package? Additional verification.
 				loss := rand.Float64()
 				if loss > packetLossRate {
-					go func() {
+
+					go func() { // Even the same host must process packets independently, so we use goroutine.
+						var replyBytes []byte
 						// Assemble regular ICMP reply packet
 						applicationLayer := packet.packet.ApplicationLayer()
-						var replyBytes []byte
+
 						if applicationLayer != nil {
 							replyBytes = applicationLayer.Payload()
 						}
@@ -87,9 +95,11 @@ func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 						time.Sleep(time.Duration(sleepms) * time.Millisecond)
 						outchan <- out
 					}()
+
 				}
 			}
 		}
 	}
+
 	log.Trace("Handler exit ", myIPAddress)
 }

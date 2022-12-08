@@ -33,18 +33,20 @@ const (
 )
 
 var (
-	// hard-coded pcap filterExpression
-	devicename       string
-	snapshotLen      int32 = 1024
-	promiscuous            = true
-	pcapHandle       *pcap.Handle
-	myMAC            []byte
-	myRouterAddress  netip.Addr
-	ipRangeString    string
-	ipRange          netipx.IPRange
-	simulateRouter   string
-	loglevel         string
-	routerMode       = false
+	devicename      string
+	snapshotLen     int32 = 1024
+	promiscuous           = true
+	pcapHandle      *pcap.Handle
+	myMAC           []byte
+	simulateRouter  string
+	routerMode      = false
+	myRouterAddress netip.Addr
+
+	ipRangeString string
+	ipRange       netipx.IPRange
+
+	loglevel string
+
 	addressTable     map[netip.Addr]chan inputPacket
 	globalPacketChan chan gopacket.Packet
 	outputChannel    chan outputPacket
@@ -80,7 +82,6 @@ func buildPacket(
 	ipLayer gopacket.SerializableLayer,
 	icmpLayer gopacket.SerializableLayer,
 	payloadBytes []byte) outputPacket {
-
 	var (
 		buffer gopacket.SerializeBuffer
 		out    outputPacket
@@ -118,7 +119,6 @@ func buildPacket(
 // Sending all prepared packets to the network in one stream.
 func toNetworkSender(out <-chan outputPacket, pcapHandler *pcap.Handle) {
 	exitWG.Add(1) // global WaitGroup for graceful shutdown
-	defer exitWG.Done()
 
 	for reply := range out {
 		log.Traceln("Write to network", reply.packetBytes)
@@ -128,6 +128,8 @@ func toNetworkSender(out <-chan outputPacket, pcapHandler *pcap.Handle) {
 			log.Fatal(err)
 		}
 	}
+
+	exitWG.Done()
 }
 
 // Initialization.
@@ -153,11 +155,13 @@ func globalInit() {
 	if err != nil {
 		ll = log.ErrorLevel
 	}
+
 	log.SetLevel(ll)
 
 	if ipRangeString == "" {
 		log.Fatal("ip parameter required")
 	}
+
 	ipRange, err = netipx.ParseIPRange(ipRangeString)
 	if err != nil {
 		log.Fatal("Cant' parse ip range")
@@ -214,6 +218,7 @@ func shutDown(signalChannel chan os.Signal) {
 func pcapInit() *gopacket.PacketSource {
 	var err error
 	pcapHandle, err = pcap.OpenLive(devicename, snapshotLen, promiscuous, pcap.BlockForever)
+
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -237,7 +242,6 @@ func pcapInit() *gopacket.PacketSource {
 // Main program.
 func main() {
 	globalInit()
-	pcapInit()
 
 	packetSource := pcapInit()
 	outputChannel = make(chan outputPacket)
@@ -297,8 +301,7 @@ func main() {
 				inputStruct.arpLayer = arp
 				dstAddr, _ = netip.AddrFromSlice(arp.DstProtAddress)
 			}
-		}
-		if icmpLayer != nil {
+		} else if icmpLayer != nil {
 			icmp, _ := icmpLayer.(*layers.ICMPv4)
 			if icmp.TypeCode.Type() == layers.ICMPv4TypeEchoRequest {
 				inputStruct.ipLayer = ip
@@ -306,9 +309,9 @@ func main() {
 				dstAddr, _ = netip.AddrFromSlice(ip.DstIP)
 			}
 		}
+
 		if !dstAddr.IsUnspecified() {
-			inputChan, exists := addressTable[dstAddr]
-			if exists {
+			if inputChan, exists := addressTable[dstAddr]; exists {
 				inputChan <- inputStruct
 			}
 		}

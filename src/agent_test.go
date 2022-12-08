@@ -68,8 +68,10 @@ func TestInputProcessorARP(t *testing.T) {
 		if len(replyPacket.packetBytes) == 0 {
 			t.Error("Packet reply size == 0")
 		}
+
 		replyGoPacket := gopacket.NewPacket(replyPacket.packetBytes, layers.LinkTypeEthernet, gopacket.Default)
 		packetOK := false
+
 		if replyArp, parsedOk := replyGoPacket.Layer(layers.LayerTypeARP).(*layers.ARP); parsedOk {
 			if replyArp.Operation == 0x2 &&
 				bytes.Equal(replyArp.SourceProtAddress, []uint8{172, 20, 0, 6}) &&
@@ -88,7 +90,6 @@ func TestInputProcessorARP(t *testing.T) {
 
 // ICMP test.
 func TestInputProcessorICMP(t *testing.T) {
-
 	var testPacketICMPRequest = []byte(
 		"\x02\x42\xac\x14\x00\x06\x02\x42\xac\x14\x00\x02\x08\x00\x45\x00\x00\x54\x4d\x05\x40\x00\x40\x01\x95\x6e\xac\x14\x00\x02\xac\x1e\x00\x01\x08\x00\xb6\xf3\x00\x07\x00\x01\xe3\xf1\x8d\x63\x00\x00\x00\x00\x05\xdc\x0b\x00\x00\x00\x00\x00\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20\x21\x22\x23\x24\x25\x26\x27\x28\x29\x2a\x2b\x2c\x2d\x2e\x2f\x30\x31\x32\x33\x34\x35\x36\x37",
 	)
@@ -117,6 +118,7 @@ func TestInputProcessorICMP(t *testing.T) {
 			mockPacket  inputPacket
 			replyPacket outputPacket
 		)
+
 		etherLayer := inPacket.Layer(layers.LayerTypeEthernet)
 		ether, _ := etherLayer.(*layers.Ethernet)
 		ipLayer := inPacket.Layer(layers.LayerTypeIPv4)
@@ -142,11 +144,14 @@ func TestInputProcessorICMP(t *testing.T) {
 		if len(replyPacket.packetBytes) == 0 {
 			t.Error("Packet reply size == 0")
 		}
+
 		if len(replyPacket.packetBytes) == 0 {
 			t.Error("Packet reply size == 0")
 		}
+
 		replyGoPacket := gopacket.NewPacket(replyPacket.packetBytes, layers.LinkTypeEthernet, gopacket.Default)
 		packetOk := false
+
 		if replyIP, parsedOk := replyGoPacket.Layer(layers.LayerTypeIPv4).(*layers.IPv4); parsedOk {
 			if replyICMP, parsedOk := replyGoPacket.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4); parsedOk {
 				if replyICMP.TypeCode == 0x0 &&
@@ -157,6 +162,7 @@ func TestInputProcessorICMP(t *testing.T) {
 				}
 			}
 		}
+
 		if !packetOk {
 			t.Error("ICMP Reply Headers incorrect")
 		}

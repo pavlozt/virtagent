@@ -2,4 +2,12 @@ linters:
   #Default: false
   #enable-all: true
   enable:
-    - revive
+  - revive
+  - govet
+  - wsl
+  - unparam
+  - unconvert
+  - bidichk
+linters-settings:
+  govet:
+    check-shadowing: true
