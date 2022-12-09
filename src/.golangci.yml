@@ -4,7 +4,6 @@ linters:
   enable:
   - revive
   - govet
-  - wsl
   - unparam
   - unconvert
   - bidichk

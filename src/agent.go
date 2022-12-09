@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/google/gopacket/layers"
@@ -14,8 +15,7 @@ import (
 // The main  function for processing packets.
 // If you want to build a custom handler, go here.
 func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPacket, outchan chan<- outputPacket) {
-	exitWG.Add(1) // global WaitGroup for graceful shutdown
-	defer exitWG.Done()
+	var senderWG sync.WaitGroup
 
 	for packet := range inchan {
 		if packet.arpLayer != nil { // if arp
@@ -42,13 +42,11 @@ func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 					log.Debugf("Build ARP Reply %v at %v", arpLayer.DstProtAddress, arpLayer.DstHwAddress)
 					out := buildPacket(ethernetLayer, arpLayer, nil, nil, nil)
 
-					exitWG.Add(1)
-
+					senderWG.Add(1)
 					go func() {
 						outchan <- out
+						senderWG.Done()
 					}()
-
-					exitWG.Done()
 				}
 			}
 		} else if packet.icmpLayer != nil { // Or is the ICMP packet ?
@@ -62,44 +60,45 @@ func inputProcessor(myIPAddress netip.Addr, isRouter bool, inchan <-chan inputPa
 				fromIPAddress == myIPAddress { // Did make a mistake when sending the package? Additional verification.
 				loss := rand.Float64()
 				if loss > packetLossRate {
+					var replyBytes []byte
+					// Assemble regular ICMP reply packet
+					applicationLayer := packet.packet.ApplicationLayer()
 
-					go func() { // Even the same host must process packets independently, so we use goroutine.
-						var replyBytes []byte
-						// Assemble regular ICMP reply packet
-						applicationLayer := packet.packet.ApplicationLayer()
+					if applicationLayer != nil {
+						replyBytes = applicationLayer.Payload()
+					}
 
-						if applicationLayer != nil {
-							replyBytes = applicationLayer.Payload()
-						}
-
-						icmpLayer := &layers.ICMPv4{
-							TypeCode: layers.ICMPv4TypeEchoReply,
-							Seq:      packet.icmpLayer.Seq,
-							Id:       packet.icmpLayer.Id,
-						}
-						ipLayer := &layers.IPv4{
-							SrcIP:    packet.ipLayer.DstIP,
-							DstIP:    packet.ipLayer.SrcIP,
-							Version:  4,
-							TTL:      245,
-							Protocol: layers.IPProtocolICMPv4,
-						}
-						ethernetLayer := &layers.Ethernet{
-							SrcMAC:       packet.etherLayer.DstMAC,
-							DstMAC:       packet.etherLayer.SrcMAC,
-							EthernetType: layers.EthernetTypeIPv4,
-						}
-						out := buildPacket(ethernetLayer, nil, ipLayer, icmpLayer, replyBytes)
-						sleepms := math.Round((float64(replyTimeoutMs) + rand.NormFloat64()*float64(replyStddevMs)))
+					icmpLayer := &layers.ICMPv4{
+						TypeCode: layers.ICMPv4TypeEchoReply,
+						Seq:      packet.icmpLayer.Seq,
+						Id:       packet.icmpLayer.Id,
+					}
+					ipLayer := &layers.IPv4{
+						SrcIP:    packet.ipLayer.DstIP,
+						DstIP:    packet.ipLayer.SrcIP,
+						Version:  4,
+						TTL:      245,
+						Protocol: layers.IPProtocolICMPv4,
+					}
+					ethernetLayer := &layers.Ethernet{
+						SrcMAC:       packet.etherLayer.DstMAC,
+						DstMAC:       packet.etherLayer.SrcMAC,
+						EthernetType: layers.EthernetTypeIPv4,
+					}
+					out := buildPacket(ethernetLayer, nil, ipLayer, icmpLayer, replyBytes)
+					sleepms := math.Round((float64(replyTimeoutMs) + rand.NormFloat64()*float64(replyStddevMs)))
+					senderWG.Add(1)
+					go func(out outputPacket) { // Even the same host must process packets independently, so we use goroutine.
 						log.Tracef("Wait for %v ms", replyTimeoutMs)
 						time.Sleep(time.Duration(sleepms) * time.Millisecond)
 						outchan <- out
-					}()
+						senderWG.Done()
+					}(out)
 
 				}
 			}
 		}
 	}
-
+	senderWG.Wait()
 	log.Trace("Handler exit ", myIPAddress)
 }

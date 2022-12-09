@@ -34,7 +34,7 @@ const (
 
 var (
 	devicename      string
-	snapshotLen     int32 = 1024
+	snapshotLen     int32 = 1500
 	promiscuous           = true
 	pcapHandle      *pcap.Handle
 	myMAC           []byte
@@ -118,7 +118,7 @@ func buildPacket(
 
 // Sending all prepared packets to the network in one stream.
 func toNetworkSender(out <-chan outputPacket, pcapHandler *pcap.Handle) {
-	exitWG.Add(1) // global WaitGroup for graceful shutdown
+	log.Trace("Network sender start")
 
 	for reply := range out {
 		log.Traceln("Write to network", reply.packetBytes)
@@ -129,7 +129,7 @@ func toNetworkSender(out <-chan outputPacket, pcapHandler *pcap.Handle) {
 		}
 	}
 
-	exitWG.Done()
+	log.Trace("Network sender stop")
 }
 
 // Initialization.
@@ -172,9 +172,6 @@ func globalInit() {
 		log.Fatal("no interfaces. Stop.")
 	}
 
-	myMAC = iface.HardwareAddr
-	log.Debug("Using device MAC ", iface.HardwareAddr.String())
-
 	rand.Seed(time.Now().UnixNano())
 
 	myRouterAddress, err = netip.ParseAddr(simulateRouter)
@@ -183,16 +180,23 @@ func globalInit() {
 	}
 
 	if routerMode {
+		if ipRange.Contains(myRouterAddress) {
+			log.Fatal("Router IP can't be inside sumulated range")
+		}
+
 		log.Debugf("Mode: router (%v) with single arp reply", myRouterAddress)
 	} else {
 		log.Debug("Mode: bridge with broadcast arp reply")
 	}
 
 	log.Debugf("Reply IP range %s", ipRange)
+
+	myMAC = iface.HardwareAddr
+	log.Debug("Using device MAC ", iface.HardwareAddr.String())
 }
 
 // Prepare for shutdown with CTRL-C .
-func prepareShutDown() {
+func prepareShutDownHandler() {
 	signalChannel := make(chan os.Signal, 1)
 	signal.Notify(signalChannel, os.Interrupt, syscall.SIGQUIT)
 
@@ -206,7 +210,7 @@ func shutDown(signalChannel chan os.Signal) {
 	close(globalPacketChan)
 
 	for ip, readChannel := range addressTable {
-		log.Traceln("closing ", ip.String())
+		log.Traceln("closing", ip.String())
 		close(readChannel)
 	}
 
@@ -238,6 +242,38 @@ func pcapInit() *gopacket.PacketSource {
 
 	return gopacket.NewPacketSource(pcapHandle, pcapHandle.LinkType())
 }
+func createProccessorPools(outputChannel chan outputPacket) {
+	// Do We need to redo thread creation only when a new packet arrives?
+	// (in this case a mutex would be needed)
+	// for ease of processing, now we create all the channels at the start.
+
+	for ip := ipRange.From(); ip.Compare(ipRange.To()) <= 0; ip = ip.Next() {
+		log.Traceln("New handler for ip:", ip)
+
+		agentInputChannel := make(chan inputPacket)
+		addressTable[ip] = agentInputChannel
+		// global WaitGroup for graceful shutdown all processors
+		exitWG.Add(1)
+		go func(ip netip.Addr) {
+			inputProcessor(ip, false, agentInputChannel, outputChannel)
+			exitWG.Done()
+		}(ip)
+	}
+	inputRouterChannel := make(chan inputPacket)
+
+	if routerMode {
+		addressTable[myRouterAddress] = inputRouterChannel
+
+		log.Traceln("New handler (router) for ip:", myRouterAddress)
+		exitWG.Add(1)
+
+		go func() {
+			inputProcessor(myRouterAddress, true, inputRouterChannel, outputChannel) // router
+			exitWG.Done()
+		}()
+	}
+
+}
 
 // Main program.
 func main() {
@@ -247,29 +283,17 @@ func main() {
 	outputChannel = make(chan outputPacket)
 	addressTable = make(map[netip.Addr]chan inputPacket)
 
-	for ip := ipRange.From(); ip.Compare(ipRange.To()) <= 0; ip = ip.Next() {
-		log.Traceln("New channel for ip:", ip)
-		// Do We need to redo thread creation only when a new packet arrives?
-		// (in this case a mutex would be needed)
-		// for ease of processing, now we create all the channels at the start.
-		agentInputChannel := make(chan inputPacket)
-		addressTable[ip] = agentInputChannel
+	createProccessorPools(outputChannel)
 
-		go inputProcessor(ip, false, agentInputChannel, outputChannel) // host(s)
-	}
+	prepareShutDownHandler()
 
-	prepareShutDown()
+	// Greate sender
+	exitWG.Add(1)
 
-	inputRouterChannel := make(chan inputPacket)
-
-	if routerMode {
-		addressTable[myRouterAddress] = inputRouterChannel
-
-		go inputProcessor(myRouterAddress, true, inputRouterChannel, outputChannel) // router
-		log.Traceln("New handler for ip:", myRouterAddress)
-	}
-	// Sender gorutine must ready to work
-	go toNetworkSender(outputChannel, pcapHandle)
+	go func() {
+		toNetworkSender(outputChannel, pcapHandle)
+		exitWG.Done()
+	}()
 
 	globalPacketChan = packetSource.Packets()
 	for packet := range globalPacketChan {
