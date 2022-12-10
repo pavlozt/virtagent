@@ -159,7 +159,7 @@ func globalInit() {
 	log.SetLevel(ll)
 
 	if ipRangeString == "" {
-		log.Fatal("ip parameter required")
+		log.Fatal("ip range required")
 	}
 
 	ipRange, err = netipx.ParseIPRange(ipRangeString)
