@@ -159,7 +159,7 @@ func globalInit() {
 	log.SetLevel(ll)
 
 	if ipRangeString == "" {
-		log.Fatal("ip range required")
+		log.Fatal("ip range parameter required")
 	}
 
 	ipRange, err = netipx.ParseIPRange(ipRangeString)
@@ -272,7 +272,6 @@ func createProccessorPools(outputChannel chan outputPacket) {
 			exitWG.Done()
 		}()
 	}
-
 }
 
 // Main program.

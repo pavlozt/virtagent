@@ -2,22 +2,23 @@ version: '3.4'
 
 services:
   icmpreply:
-    image: icmpreply:latest
+    image: icmpreply:debug-latest
     environment:
       - SIMULATE_ROUTER=172.20.0.6
       - SIMULATE_NETWORK=172.30.0.1-172.30.0.10
-      #- SIMULATE_NETWORK=172.20.0.10
     # additional options can be passed to program :
-    #command: -loglevel debug
+    command: -loglevel debug
     build:
       context: src
-      dockerfile: ../Dockerfile
+      dockerfile: ../Dockerfile.debug
     cap_add:
       - NET_ADMIN
+    ports:
+      - 4000:4000
     networks:
       simulator:
         # must provide an IP to make Docker happy
-        ipv4_address: "172.20.0.6"
+        ipv4_address: "172.20.0.5"
 
 # Just run: docker compose run netshell bash
 # Simulated network defined as environment variable
@@ -31,7 +32,7 @@ services:
     depends_on:
       - icmpreply
     environment:
-      - IP_GATEWAY=172.20.0.6
+      - IP_GATEWAY=172.20.0.5
       - IP_ROUTE=172.30.0.0/24
     command: bash
     stdin_open: true
@@ -44,5 +45,3 @@ networks:
     ipam:
       config:
         - subnet: "172.20.0.0/24"
-
-

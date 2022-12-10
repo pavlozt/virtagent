@@ -23,7 +23,11 @@
             "request": "attach",
             "mode": "remote",
             "port": 4000,
-            "host": "127.0.0.1"
+            "host": "127.0.0.1",
+            "preLaunchTask": "Docker Compose Up",
+            "postDebugTask": "Docker Compose Down"
+            //"remotePath": "/app"
+            //"dlvFlags": []
         }
     ]
 }

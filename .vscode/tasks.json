@@ -14,6 +14,34 @@
             "options": {
                 "cwd": "${fileDirname}"
             }
-        }
+        },
+        {
+            "label": "Docker Compose Up",
+            "type": "docker-compose",
+            "dockerCompose": {
+                "up": {
+                    "detached": true,
+                    "build": true,
+                },
+                "files": [
+                    "${workspaceFolder}/docker-compose.debug.yml"
+                ]
+            }
+
+        },
+        {
+            "label": "Docker Compose Down",
+            "type": "docker-compose",
+            "dockerCompose": {
+                "down": {
+                    "removeVolumes": false
+                },
+                "files": [
+                    "${workspaceFolder}/docker-compose.debug.yml"
+                ]
+            }
+
+        },
+
     ]
 }
