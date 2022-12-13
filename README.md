@@ -12,7 +12,7 @@ For 16384 hosts, the program consumes 332.5Mb memory (20Kb per gorutine).
 
 #  Example of use #
 A small demonstration of work in a docker environment (assume you  clone source code.)
-Up docker-compose project with terminal and ping 254 generated (fping -g) addresses in parallel:
+Up docker-compose project with terminal and ping 10 generated (fping -g) addresses in parallel:
 ```
 docker compose build
 docker compose run netshell bash
