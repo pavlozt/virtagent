@@ -5,10 +5,12 @@ on:
     branches:
     - master
     - testing
+    - security*
   pull_request:
     branches:
     - master
     - testing
+    - security*
 
 jobs:
   golang:
