@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/google/gopacket v1.1.19
-	github.com/sirupsen/logrus v1.9.0
+	github.com/sirupsen/logrus v1.9.1
 	go4.org/netipx v0.0.0-20230125063823-8449b0a6169f
 )
 
